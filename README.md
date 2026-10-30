@@ -72,6 +72,15 @@ data/
 requirements.txt                 Python packages for the build and the server (run.py installs them for you)
 ```
 
+## Running in the browser (GitHub Pages)
+
+The page also works with no server at all, for example on GitHub Pages. When the page is opened from a web address that is not your own computer, it runs this repository's server code (`src/server.py`) inside the browser: Python and `py_ewr` run in WebAssembly (Pyodide) in a web worker, and the page's `/api/...` requests are answered by it. Nothing is uploaded; your files stay in the tab and are gone when it closes. The first use of **Your data** downloads about 50 MB (Python, pandas, scipy and friends), which the browser then caches; viewing the review results needs none of it.
+
+- **Your data**, user EWRs and the flow charts work as they do locally, one gauge at a time and somewhat slower.
+- **Observed** does not work there: the state water agencies' data services refuse requests from other websites. Run the dashboard locally for it.
+- `python3 scripts/build_pages.py` writes the publishable site to `site/` (the `Publish GitHub Pages` workflow does this on every push to `main`).
+- `tests/test_browser_parity.py` runs the same requests against the native server and the in-browser one and requires identical answers (numbers to 1e-9). It needs `npm ci` in `tests/browser_parity`.
+
 ## Rebuild the HTML
 
 You need Python 3.10 or later.

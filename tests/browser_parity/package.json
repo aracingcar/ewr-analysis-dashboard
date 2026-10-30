@@ -1,0 +1,5 @@
+{
+  "private": true,
+  "description": "Pyodide for tests/test_browser_parity.py (npm ci here to enable that test)",
+  "dependencies": { "pyodide": "0.27.7" }
+}

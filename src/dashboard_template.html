@@ -190,7 +190,7 @@ const esc=s=>String(s).replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",
 const $=id=>document.getElementById(id);
 
 const CUSTOM=[];   // user scenarios {key, name, sdl, P, vals, removed, id, flowGauges, fmt}
-const OBSERVED_UNITS=[]; let STATIC_HOST=false, OBSERVED_AVAILABLE=null, OBSERVED_LOADING=false;
+const OBSERVED_UNITS=[]; let OBSERVED_AVAILABLE=null, OBSERVED_LOADING=false;
 const todayLocal=()=>{const d=new Date();d.setMinutes(d.getMinutes()-d.getTimezoneOffset());return d.toISOString().slice(0,10);};
 const obsSaved=()=>{try{return JSON.parse(localStorage.getItem("ewrObservedSelection")||"{}");}catch(e){return {};}};
 const obsInitial=obsSaved();
@@ -597,6 +597,42 @@ async function runObserved(gauges,merge=false){
     }
   }catch(error){ if(token===observedWatch){S.obs.job=null;S.obs.runIds=[];S.obs.completed=false;S.obs.progress=null;S.obs.notice="Failed: "+error.message;render();} }
 }
+const BROWSER_OBSERVED_NOTICE="Observed data cannot be fetched from a web page: the state water agencies' data services do not allow requests from other websites. Run the dashboard locally (python3 run.py) to use it.";
+/* Hosted without the local analysis server (e.g. GitHub Pages): the same server code runs in this browser (Pyodide, in a web worker; see
+   src/engine_worker.js and src/browser_backend.py). Requests to /api/... are answered by that worker, which is only downloaded and started
+   by the first request that needs it, so the review results themselves load without it. Nothing is uploaded anywhere. */
+function installBrowserEngine(){
+  if(window.BROWSER_ENGINE) return; window.BROWSER_ENGINE=true;
+  const realFetch=window.fetch.bind(window), pending=new Map(); let worker=null, seq=0;
+  const banner=document.createElement("div"); banner.id="engineMsg"; banner.hidden=true; banner.setAttribute("role","status");
+  banner.style.cssText="position:fixed;left:12px;bottom:12px;z-index:5000;max-width:min(420px,calc(100vw - 24px));padding:8px 12px;border-radius:6px;background:#1f4e8c;color:#fff;font:12px system-ui,sans-serif;box-shadow:0 2px 8px #0004";
+  document.body.appendChild(banner);
+  function start(){
+    if(worker) return worker;
+    worker=new Worker(new URL("engine_worker.js",location.href));
+    worker.onmessage=({data})=>{
+      if(data.type==="status"){ banner.textContent=data.text; banner.hidden=!data.text; return; }
+      const p=pending.get(data.id); if(!p) return; pending.delete(data.id);
+      if(data.error) p.reject(new TypeError("In-browser analysis engine: "+data.error));
+      else p.resolve(new Response(data.body,{status:data.status,headers:data.headers}));
+    };
+    worker.onerror=e=>{ for(const p of pending.values()) p.reject(new TypeError("In-browser analysis engine failed to start: "+(e.message||"unknown error"))); pending.clear(); worker=null; banner.hidden=true; };
+    return worker;
+  }
+  window.fetch=async function(input,init){
+    const req=input instanceof Request?input:null, url=new URL(req?req.url:String(input),location.href);
+    if(url.origin!==location.origin||!url.pathname.startsWith("/api/")) return realFetch(input,init);
+    const method=(init?.method||req?.method||"GET").toUpperCase(), signal=init?.signal||req?.signal;
+    if(url.pathname==="/api/ping") return new Response(JSON.stringify({ok:true,browser:true,observed:{available:false,bom:false,message:BROWSER_OBSERVED_NOTICE}}),{headers:{"Content-Type":"application/json"}});
+    const headers=Object.fromEntries(new Headers(init?.headers||req?.headers||{}).entries());
+    const rawBody=init?.body??null, body=rawBody==null?new ArrayBuffer(0):await new Response(rawBody).arrayBuffer();
+    const id=++seq, response=new Promise((resolve,reject)=>pending.set(id,{resolve,reject}));
+    start().postMessage({id,method,path:url.pathname+url.search,headers,body},[body]);
+    const result=await response;
+    if(signal?.aborted) throw new DOMException("The operation was aborted.","AbortError");
+    return result;
+  };
+}
 function initObserved(){
   if(PRELOADED.length)return;
   Promise.resolve().then(async()=>{
@@ -606,7 +642,7 @@ function initObserved(){
       if(OBSERVED_AVAILABLE){const result=await (await fetch("/api/observed/units",{cache:"no-store"})).json(); OBSERVED_UNITS.splice(0,OBSERVED_UNITS.length,...(result.units||[]));}
       else S.obs.notice=ping.observed?.message||"Observed data support is unavailable. Install requirements-observed.txt and restart the local server.";
     }catch{OBSERVED_AVAILABLE=false;S.obs.notice="Start the local analysis server to fetch observed gauge data.";
-      if(!/^(localhost|127\.0\.0\.1|\[::1\])$/.test(location.hostname)&&location.protocol!=="file:"){STATIC_HOST=true;if(S.src==="user")S.src="demo";fillPolicyOptions();syncSrc();}}
+      if(!/^(localhost|127\.0\.0\.1|\[::1\])$/.test(location.hostname)&&location.protocol!=="file:"){installBrowserEngine();S.obs.notice=BROWSER_OBSERVED_NOTICE;}}
     if(S.src==="observed"&&OBSERVED_AVAILABLE===false){S.src="demo";fillPolicyOptions();}
     if(S.obs.sdl){const si=observedSdlIndex(); if(si>=0&&S.src==="observed") S.sel={type:"sdl",i:si};}
     refresh();
@@ -1809,8 +1845,7 @@ $("scnRun").onclick=async()=>{
 };
 function updateClimDisable(){ if(isCustom(S.pol)&&S.cli!==0){ S.cli=0; $("cli").value=0; } if(isCustom(S.bpol)&&S.bcli!==0){ S.bcli=0; $("bcli").value=0; }
   $("cli").disabled=isCustom(S.pol); $("bcli").disabled=isCustom(S.bpol); }
-function syncSrc(){ for(const id of ["srcO","srcU"]) $(id).hidden=STATIC_HOST;   // hosted without the analysis server (e.g. GitHub Pages): only the built-in review results work
-  $("srcO").classList.toggle("on",S.src==="observed"); $("srcD").classList.toggle("on",S.src==="demo"); $("srcU").classList.toggle("on",S.src==="user");
+function syncSrc(){ $("srcO").classList.toggle("on",S.src==="observed"); $("srcD").classList.toggle("on",S.src==="demo"); $("srcU").classList.toggle("on",S.src==="user");
   $("srcO").disabled=OBSERVED_AVAILABLE===false; $("srcO").title=OBSERVED_AVAILABLE===false?(S.obs.notice||"Observed data needs the local server and mdba-gauge-getter."):"Fetch observed gauge records from the local server";
   $("mSV").disabled=S.src==="demo"; if(S.src==="demo"&&S.metric==="sev"){ S.metric="et"; syncUI(); }
   const pd=S.src==="demo"; $("period").disabled=pd; if(pd) S.period=""; $("period").value=S.period; $("perL").classList.toggle("on",!!S.period);
