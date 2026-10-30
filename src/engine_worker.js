@@ -4,6 +4,7 @@
 // scripts/build_pages.py writes next to this file.
 const PYODIDE = "https://cdn.jsdelivr.net/pyodide/v0.27.7/full/";
 const PY_PACKAGES = ["pandas", "numpy", "scipy", "h5py", "netcdf4", "xarray", "cachetools", "requests", "lxml", "micropip"];
+const OBSERVED_PACKAGES = ["bomwater==0.0.8"];  // the getter imports it; its dependencies (shapely, pandas, ...) are in Pyodide or tiny pure-Python wheels
 const PYPI_PACKAGES = ["py_ewr==2.4.11", "mdba-gauge-getter==0.5.1"];  // pure Python; their dependencies come from Pyodide above (numpy 2 is fine for py_ewr's use)
 
 importScripts(PYODIDE + "pyodide.js");
@@ -17,6 +18,8 @@ async function boot() {
   await py.loadPackage(PY_PACKAGES);
   status("Installing the EWR tool (py_ewr)…");
   await py.runPythonAsync(`import micropip\nawait micropip.install(${JSON.stringify(PYPI_PACKAGES)}, deps=False)`);
+  const { observedProxy = "" } = await (await fetch("config.json")).json().catch(() => ({}));
+  if (observedProxy) await py.runPythonAsync(`import micropip\nawait micropip.install(${JSON.stringify(OBSERVED_PACKAGES)})`);
   status("Loading the dashboard's analysis code…");
   const files = await (await fetch("files.json")).json();
   await Promise.all(files.map(async (name) => {
@@ -30,6 +33,7 @@ async function boot() {
 import sys
 sys.path.insert(0, "/app/src")
 import browser_backend
+browser_backend.configure(${JSON.stringify(observedProxy)})
 
 def call(method, path, headers, body):
     status, out, payload = browser_backend.handle(method, path, dict(headers), bytes(body.to_py()))

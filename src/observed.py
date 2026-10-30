@@ -393,6 +393,32 @@ def sdl_gauges(sdl: str) -> list[str]:
     return sorted(gauges)
 
 
+def route_requests_through(proxy: str, timeout: float = 120) -> None:
+    """Send the getter's HTTP requests through a forwarding proxy: `https://host/path?query` becomes `<proxy>/host/path?query`.
+
+    Used when the code runs in a web page (src/browser_backend.py), where the agencies' services cannot be called directly. Replaces
+    `requests.get`, the only call the getter makes; inside Pyodide `requests` is first switched to the browser's XMLHttpRequest.
+    """
+    import requests
+
+    try:
+        import pyodide_http  # only exists in Pyodide
+
+        pyodide_http.patch_requests()
+    except ImportError:
+        pass
+    send, base = requests.get, proxy.rstrip("/")
+
+    def get(url: str, **kwargs: Any) -> Any:
+        parts = urlsplit(url)
+        if parts.scheme != "https":
+            raise requests.exceptions.InvalidSchema(f"only https requests are forwarded: {url[:60]}")
+        kwargs.setdefault("timeout", timeout)
+        return send(f"{base}/{parts.netloc}{parts.path}" + (f"?{parts.query}" if parts.query else ""), **kwargs)
+
+    vars(requests)["get"] = get
+
+
 def _fetch_source(gauge: str, start: date, end: date, var: str, timeout: float, retries: int) -> pd.DataFrame:
     """Call the getter with advisory timeout and transient retries, leaving all routing to it.
 

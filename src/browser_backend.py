@@ -8,7 +8,8 @@ validation, py_ewr calls and JSON are the code in server.py, not a copy. Only th
       (the page's polling then finds the job already done);
     - uploaded series live in the browser's in-memory file system and are gone when the tab is closed.
 
-Observed data is not served from here: the agencies' APIs do not allow cross-origin browser requests (see /api/ping).
+Observed data: the agencies' APIs do not allow cross-origin browser requests, so the getter's requests go through the forwarding proxy
+(proxy/worker.js) whose address `configure` is given. Without one, Observed is reported unavailable.
 """
 
 import io
@@ -17,6 +18,7 @@ import os
 import sys
 import threading
 import types
+from concurrent.futures import Future
 from email.message import Message
 from typing import Any, cast
 
@@ -48,6 +50,27 @@ class ProcessPoolExecutor:
         raise OSError("worker processes are not available in the browser")
 
 
+class _InlineExecutor:
+    """ThreadPoolExecutor stand-in for observed.fetch_many: runs each submitted call at once (no threads in WebAssembly)."""
+
+    def __init__(self, *args: Any, **kwargs: Any) -> None:
+        pass
+
+    def __enter__(self) -> "_InlineExecutor":
+        return self
+
+    def __exit__(self, *exc: Any) -> None:
+        return None
+
+    def submit(self, fn: Any, *args: Any, **kwargs: Any) -> Future[Any]:
+        future: Future[Any] = Future()
+        try:
+            future.set_result(fn(*args, **kwargs))
+        except Exception as exc:
+            future.set_exception(exc)
+        return future
+
+
 _process = types.ModuleType("concurrent.futures.process")
 _process.BrokenProcessPool = BrokenProcessPool  # type: ignore[attr-defined]
 _process.ProcessPoolExecutor = ProcessPoolExecutor  # type: ignore[attr-defined]
@@ -57,13 +80,30 @@ import concurrent.futures  # noqa: E402
 concurrent.futures.__dict__["ProcessPoolExecutor"] = ProcessPoolExecutor
 threading.Thread = _InlineThread  # type: ignore[misc,assignment]
 
+import observed  # noqa: E402
 import server  # noqa: E402  (imported after the threading patch so server.threading.Thread is the inline one)
+
+observed.ThreadPoolExecutor = _InlineExecutor  # type: ignore[misc,assignment]
 
 HOST = "localhost:8792"
 OBSERVED_UNAVAILABLE = (
-    "Observed data cannot be fetched from a web page: the state water agencies' data services do not allow requests from other websites. "
-    "Run the dashboard locally (python3 run.py) to use it."
+    "Observed data cannot be fetched from a web page without a forwarding proxy: the state water agencies' data services do not allow "
+    "requests from other websites (see proxy/README.md). Run the dashboard locally (python3 run.py) to use it."
 )
+OBSERVED_PROXY = ""
+
+
+def configure(observed_proxy: str = "") -> None:
+    """Route the observed-data getter's HTTP requests through the proxy at this address ("" = Observed unavailable).
+
+    The rewriting is observed.route_requests_through (the getter's requests are the adapter's business). Inside Pyodide `requests` is first
+    switched to browser XMLHttpRequest, which the proxy's CORS headers allow.
+    """
+    global OBSERVED_PROXY
+    OBSERVED_PROXY = observed_proxy.rstrip("/")
+    if not OBSERVED_PROXY:
+        return
+    observed.route_requests_through(OBSERVED_PROXY)
 
 
 def _json(status: int, obj: Any) -> tuple[int, dict[str, str], bytes]:
@@ -103,7 +143,7 @@ class _Request(server.Handler):
 
 def handle(method: str, path: str, headers: dict[str, str], body: bytes) -> tuple[int, dict[str, str], bytes]:
     """Answer one API request: (status, response headers, body)."""
-    if path.split("?")[0].startswith("/api/observed/") and method == "POST":
+    if path.split("?")[0].startswith("/api/observed/") and not OBSERVED_PROXY:
         return _json(503, {"message": OBSERVED_UNAVAILABLE})
     request = _Request(method, path, headers, body)
     {"GET": request.do_GET, "POST": request.do_POST}.get(method, lambda: request.send_error(405))()
@@ -117,7 +157,7 @@ def handle(method: str, path: str, headers: dict[str, str], body: bytes) -> tupl
         out[name.strip()] = value.strip()
     if path.split("?")[0] == "/api/ping":
         info = json.loads(payload)
-        info["observed"] = {"available": False, "bom": False, "message": OBSERVED_UNAVAILABLE}
+        info["observed"] = {"available": bool(OBSERVED_PROXY), "bom": False, "message": OBSERVED_UNAVAILABLE}
         payload = json.dumps(info).encode()
     return status, out, payload
 

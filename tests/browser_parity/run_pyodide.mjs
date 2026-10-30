@@ -8,11 +8,12 @@ import path from "node:path";
 const [site, examples, scenario, output] = process.argv.slice(2);
 const worker = fs.readFileSync(path.join(site, "engine_worker.js"), "utf8");
 const list = (name) => JSON.parse(worker.match(new RegExp(`const ${name} = (\\[.*?\\]);`, "s"))[1]);
-const PY_PACKAGES = list("PY_PACKAGES"), PYPI_PACKAGES = list("PYPI_PACKAGES");
+const PY_PACKAGES = list("PY_PACKAGES"), PYPI_PACKAGES = list("PYPI_PACKAGES"), OBSERVED_PACKAGES = list("OBSERVED_PACKAGES");
 
 const py = await loadPyodide();
 await py.loadPackage(PY_PACKAGES);
 await py.runPythonAsync(`import micropip\nawait micropip.install(${JSON.stringify(PYPI_PACKAGES)}, deps=False)`);
+await py.runPythonAsync(`import micropip\nawait micropip.install(${JSON.stringify(OBSERVED_PACKAGES)})`);
 for (const name of JSON.parse(fs.readFileSync(path.join(site, "files.json"), "utf8"))) {
   const target = "/app/" + name.replace(/^engine\//, "");
   py.FS.mkdirTree(path.dirname(target));
@@ -21,11 +22,13 @@ for (const name of JSON.parse(fs.readFileSync(path.join(site, "files.json"), "ut
 py.FS.mkdirTree("/examples");
 for (const name of fs.readdirSync(examples)) if (name.endsWith(".csv")) py.FS.writeFile("/examples/" + name, new Uint8Array(fs.readFileSync(path.join(examples, name))));
 py.FS.mkdirTree("/parity");
-py.FS.writeFile("/parity/scenario.py", new Uint8Array(fs.readFileSync(scenario)));
+for (const name of ["scenario.py", "fake_agencies.py"]) py.FS.writeFile("/parity/" + name, new Uint8Array(fs.readFileSync(path.join(path.dirname(scenario), name))));
 const result = await py.runPythonAsync(`
 import json, sys
 sys.path[:0] = ["/app/src", "/parity"]
-import browser_backend, scenario
+import browser_backend, fake_agencies, scenario
+fake_agencies.install()  # no network here: the agencies' answers are synthetic and identical to the native run's
+browser_backend.OBSERVED_PROXY = "fake"  # Observed counts as available; configure() is not called because requests.get is already replaced
 
 def call(method, path, headers=None, body=b""):
     status, _, payload = browser_backend.handle(method, path, headers or {}, bytes(body))

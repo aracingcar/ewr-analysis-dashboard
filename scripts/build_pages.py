@@ -4,6 +4,7 @@
 
 site/index.html            the generated dashboard page (src/build_dashboard.py)
 site/engine_worker.js      web worker that starts Pyodide (Python in WebAssembly) and answers the page's /api/... requests
+site/config.json           {"observedProxy": <OBSERVED_PROXY_URL environment variable, "" when unset>}: the forwarding proxy for Observed data
 site/files.json            the files the worker copies into Pyodide's file system
 site/engine/src/*.py       the server code, unchanged (the worker imports it through src/browser_backend.py)
 site/engine/data/...       the reference tables that code reads, and the review's gauge/unit/objective list (data/results is too big to
@@ -11,6 +12,7 @@ site/engine/data/...       the reference tables that code reads, and the review'
 """
 
 import json
+import os
 import shutil
 import sys
 from pathlib import Path
@@ -23,6 +25,7 @@ sys.path.insert(0, str(ROOT / "src"))
 import build_dashboard  # noqa: E402
 
 RESULT_COLUMNS = {"Gauge", "PlanningUnitName", "EcoObj", "FlowRegime", "EWR", "State"}  # what custom_ewr.review_context reads
+REFERENCE_DIRS = ("bom_water/cache",)  # the getter's bomwater station list (see observed._use_repo_bom_cache)
 REFERENCE_FILES = ("parameter_sheet.csv", "objective_reference.csv", "northern_connectivity_stations.csv", "bom_quality_codes.json")
 
 
@@ -38,11 +41,18 @@ def main(out: Path) -> None:
     shutil.copy(ROOT / "ewr_analysis_dashboard.html", out / "index.html")
     shutil.copy(ROOT / "src" / "engine_worker.js", out / "engine_worker.js")
     (out / ".nojekyll").touch()
+    proxy = os.environ.get("OBSERVED_PROXY_URL", "").strip().rstrip("/")
+    (out / "config.json").write_text(json.dumps({"observedProxy": proxy}) + "\n")  # "" = Observed is unavailable on the page
 
     for source in sorted((ROOT / "src").glob("*.py")):
         shutil.copy(source, engine / "src" / source.name)
     for name in REFERENCE_FILES:
         shutil.copy(ROOT / "data" / "reference" / name, engine / "data" / "reference" / name)
+    for directory in REFERENCE_DIRS:
+        shutil.copytree(ROOT / "data" / "reference" / directory, engine / "data" / "reference" / directory)
+    (engine / "data" / "map").mkdir()
+    stations = pd.read_csv(ROOT / "data" / "map" / "bom_gauge_stations.csv", dtype=str, usecols=["station_no", "station_name"])
+    stations.drop_duplicates().to_csv(engine / "data" / "map" / "bom_gauge_stations.csv", index=False)  # server.observed_units reads two columns
     for name in ("frequency_ratio.csv", "etp.csv"):
         frame = pd.read_csv(ROOT / "data" / "results" / name, dtype=str, usecols=lambda c: c in RESULT_COLUMNS).fillna("")
         frame.drop_duplicates().to_csv(engine / "data" / "results" / name, index=False)

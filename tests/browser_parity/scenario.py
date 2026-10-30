@@ -14,6 +14,8 @@ from typing import Any
 
 Call = Callable[..., tuple[int, bytes]]
 
+OBSERVED_GAUGE = "410001"  # answered by tests/browser_parity/fake_agencies.py
+
 UPLOADS = [  # (example file, scenario id, gauges in it)
     ("dummy_broken_scenario_A.csv", "pa", "404216 404243"),
     ("dummy_broken_scenario_A_level_salinity.csv", "pb", "404216 404243"),
@@ -108,5 +110,20 @@ def run(call: Call, read_example: Callable[[str], bytes]) -> dict[str, Any]:
     post("uewr invalid", "/api/uewr/preview", json_headers, json.dumps({"spec": {**spec, "params": {**spec["params"], "Duration": -1}}, "scn": "pa"}).encode())
     post("uewr delete", f"/api/uewr/delete?id={spec_id}", json_headers, b"{}")
     get("uewr list", "/api/uewr")
+    units = get("observed units", "/api/observed/units")["units"]
+    unit = next(u for u in units if any(g["id"] == OBSERVED_GAUGE for g in u["gauges"]))
+    request = {
+        "sdl": unit["sdl"],
+        "gauges": [OBSERVED_GAUGE],
+        "filter_period": True,
+        "start": "2000-07-01",
+        "end": "2004-06-30",
+        "refresh": False,
+        "merge": False,
+    }
+    started = post("observed run", "/api/observed/run", json_headers, json.dumps(request).encode())
+    out["observed job"] = _wait(call, started["job"])
+    scn = "obs_" + "".join(c if c.isalnum() else "_" for c in unit["sdl"].lower()).strip("_")
+    get("observed fdc", "/api/curves?" + q(base=scn, gauge=OBSERVED_GAUGE, kind="fdc"))
     post("forget", "/api/forget?id=pd", {}, b"")
     return out

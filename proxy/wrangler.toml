@@ -1,0 +1,8 @@
+# Deploy with:  cd proxy && npx wrangler deploy      (needs a free Cloudflare account; see proxy/README.md)
+name = "ewr-observed-proxy"
+main = "worker.js"
+compatibility_date = "2025-01-01"
+
+[vars]
+# Pages that may use the proxy (browsers send the Origin header; anything else is refused). Add your own domain here if you host elsewhere.
+ALLOWED_ORIGINS = "https://aracingcar.github.io"

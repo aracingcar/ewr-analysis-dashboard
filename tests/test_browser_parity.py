@@ -17,7 +17,9 @@ from pathlib import Path
 from typing import Any
 
 import pytest
+import requests
 
+import observed
 import server
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -29,8 +31,8 @@ VOLATILE = {"elapsed", "job", "id", "uewr_id", "created", "updated"}  # job/defi
 pytestmark = pytest.mark.slow
 
 
-def _scenario():
-    spec = importlib.util.spec_from_file_location("parity_scenario", PARITY / "scenario.py")
+def _load(name: str) -> Any:
+    spec = importlib.util.spec_from_file_location(f"parity_{name}", PARITY / f"{name}.py")
     assert spec is not None and spec.loader is not None
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
@@ -41,6 +43,10 @@ def _native(tmp_path, monkeypatch) -> dict[str, Any]:
     monkeypatch.setattr(server, "STORE", tmp_path / "store")
     monkeypatch.setattr(server, "FLOWS", {})
     monkeypatch.setattr(server, "_EVAL_CACHE", {})
+    monkeypatch.setattr(observed, "CACHE_DIR", tmp_path / "observed_cache")
+    fake = _load("fake_agencies")
+    monkeypatch.setattr(requests, "get", requests.get)  # restored afterwards; install() replaces it
+    fake.install()
     httpd = server.ThreadingHTTPServer(("127.0.0.1", 0), server.Handler)
     threading.Thread(target=httpd.serve_forever, daemon=True).start()
     port = httpd.server_address[1]
@@ -54,7 +60,7 @@ def _native(tmp_path, monkeypatch) -> dict[str, Any]:
         return response.status, data
 
     try:
-        result: dict[str, Any] = _scenario().run(call, lambda name: (EXAMPLES / name).read_bytes())
+        result: dict[str, Any] = _load("scenario").run(call, lambda name: (EXAMPLES / name).read_bytes())
         return result
     finally:
         httpd.shutdown()
@@ -97,10 +103,10 @@ def test_browser_server_matches_native_server(tmp_path, monkeypatch):
     browser = _browser(tmp_path)
 
     # The script must have exercised real answers, not two identical sets of errors.
-    for name in ("job pa", "job pb", "job pc", "job pd", "uewr job"):
+    for name in ("job pa", "job pb", "job pc", "job pd", "uewr job", "observed job"):
         assert native[name]["status"] == "done", (name, native[name])
     assert len(native["job pc"]["rows"]) > 10
-    for name in ("heatmap", "curves fdc", "ewryears", "regimes", "uewr preview", "uewr save"):
+    for name in ("heatmap", "curves fdc", "ewryears", "regimes", "uewr preview", "uewr save", "observed units", "observed run", "observed fdc"):
         assert native[name]["status"] == 200, (name, native[name])
     assert native["uewr invalid"]["status"] == 400
 

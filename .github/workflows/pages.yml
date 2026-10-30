@@ -26,6 +26,8 @@ jobs:
           python-version: "3.12"
       - run: pip install pandas numpy shapely
       - run: python scripts/build_pages.py site
+        env:
+          OBSERVED_PROXY_URL: ${{ vars.OBSERVED_PROXY_URL }}  # optional: see proxy/README.md
       - uses: actions/upload-pages-artifact@v3
         with:
           path: site

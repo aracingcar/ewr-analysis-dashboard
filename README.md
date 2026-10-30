@@ -77,7 +77,7 @@ requirements.txt                 Python packages for the build and the server (r
 The page also works with no server at all, for example on GitHub Pages. When the page is opened from a web address that is not your own computer, it runs this repository's server code (`src/server.py`) inside the browser: Python and `py_ewr` run in WebAssembly (Pyodide) in a web worker, and the page's `/api/...` requests are answered by it. Nothing is uploaded; your files stay in the tab and are gone when it closes. The first use of **Your data** downloads about 50 MB (Python, pandas, scipy and friends), which the browser then caches; viewing the review results needs none of it.
 
 - **Your data**, user EWRs and the flow charts work as they do locally, one gauge at a time and somewhat slower.
-- **Observed** does not work there: the state water agencies' data services refuse requests from other websites. Run the dashboard locally for it.
+- **Observed** needs a small forwarding proxy, because the state water agencies' data services refuse requests from other websites. Deploy [proxy/worker.js](proxy/README.md) (a free Cloudflare Worker, about five minutes) and set the `OBSERVED_PROXY_URL` repository variable; without it the Observed tab is greyed out on the page. It runs one gauge at a time with no live progress until the run finishes. Locally (`python3 run.py`) no proxy is needed.
 - `python3 scripts/build_pages.py` writes the publishable site to `site/` (the `Publish GitHub Pages` workflow does this on every push to `main`).
 - `tests/test_browser_parity.py` runs the same requests against the native server and the in-browser one and requires identical answers (numbers to 1e-9). It needs `npm ci` in `tests/browser_parity`.
 
