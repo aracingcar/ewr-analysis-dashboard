@@ -190,7 +190,7 @@ const esc=s=>String(s).replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",
 const $=id=>document.getElementById(id);
 
 const CUSTOM=[];   // user scenarios {key, name, sdl, P, vals, removed, id, flowGauges, fmt}
-const OBSERVED_UNITS=[]; let OBSERVED_AVAILABLE=null, OBSERVED_LOADING=false;
+const OBSERVED_UNITS=[]; let STATIC_HOST=false, OBSERVED_AVAILABLE=null, OBSERVED_LOADING=false;
 const todayLocal=()=>{const d=new Date();d.setMinutes(d.getMinutes()-d.getTimezoneOffset());return d.toISOString().slice(0,10);};
 const obsSaved=()=>{try{return JSON.parse(localStorage.getItem("ewrObservedSelection")||"{}");}catch(e){return {};}};
 const obsInitial=obsSaved();
@@ -605,7 +605,8 @@ function initObserved(){
       OBSERVED_AVAILABLE=!!ping.observed?.available;
       if(OBSERVED_AVAILABLE){const result=await (await fetch("/api/observed/units",{cache:"no-store"})).json(); OBSERVED_UNITS.splice(0,OBSERVED_UNITS.length,...(result.units||[]));}
       else S.obs.notice=ping.observed?.message||"Observed data support is unavailable. Install requirements-observed.txt and restart the local server.";
-    }catch{OBSERVED_AVAILABLE=false;S.obs.notice="Start the local analysis server to fetch observed gauge data.";}
+    }catch{OBSERVED_AVAILABLE=false;S.obs.notice="Start the local analysis server to fetch observed gauge data.";
+      if(!/^(localhost|127\.0\.0\.1|\[::1\])$/.test(location.hostname)&&location.protocol!=="file:"){STATIC_HOST=true;if(S.src==="user")S.src="demo";fillPolicyOptions();syncSrc();}}
     if(S.src==="observed"&&OBSERVED_AVAILABLE===false){S.src="demo";fillPolicyOptions();}
     if(S.obs.sdl){const si=observedSdlIndex(); if(si>=0&&S.src==="observed") S.sel={type:"sdl",i:si};}
     refresh();
@@ -1808,7 +1809,8 @@ $("scnRun").onclick=async()=>{
 };
 function updateClimDisable(){ if(isCustom(S.pol)&&S.cli!==0){ S.cli=0; $("cli").value=0; } if(isCustom(S.bpol)&&S.bcli!==0){ S.bcli=0; $("bcli").value=0; }
   $("cli").disabled=isCustom(S.pol); $("bcli").disabled=isCustom(S.bpol); }
-function syncSrc(){ $("srcO").classList.toggle("on",S.src==="observed"); $("srcD").classList.toggle("on",S.src==="demo"); $("srcU").classList.toggle("on",S.src==="user");
+function syncSrc(){ for(const id of ["srcO","srcU"]) $(id).hidden=STATIC_HOST;   // hosted without the analysis server (e.g. GitHub Pages): only the built-in review results work
+  $("srcO").classList.toggle("on",S.src==="observed"); $("srcD").classList.toggle("on",S.src==="demo"); $("srcU").classList.toggle("on",S.src==="user");
   $("srcO").disabled=OBSERVED_AVAILABLE===false; $("srcO").title=OBSERVED_AVAILABLE===false?(S.obs.notice||"Observed data needs the local server and mdba-gauge-getter."):"Fetch observed gauge records from the local server";
   $("mSV").disabled=S.src==="demo"; if(S.src==="demo"&&S.metric==="sev"){ S.metric="et"; syncUI(); }
   const pd=S.src==="demo"; $("period").disabled=pd; if(pd) S.period=""; $("period").value=S.period; $("perL").classList.toggle("on",!!S.period);
